@@ -52,9 +52,31 @@ if header_row is not None:
     print("\nSample Fraser Institute data:")
     print(fraser_clean.head())
     
-    # Show unique provinces and years
+    # Show unique provinces and years (using correct column name)
     print(f"\nFraser Institute provinces: {fraser_clean['Province'].unique()}")
-    print(f"Fraser Institute years: {sorted(fraser_clean['Year'].unique())}")
+    
+    # Check what the year column is called
+    year_col = None
+    for col in fraser_clean.columns:
+        if 'year' in str(col).lower() or 'date' in str(col).lower():
+            year_col = col
+            break
+    
+    if year_col:
+        print(f"Year column found: {year_col}")
+        print(f"Fraser Institute years: {sorted(fraser_clean[year_col].unique())}")
+    else:
+        print("No year column found in Fraser Institute data")
+        year_col = 'Data year'  # Try this as default
+    
+    # Show more details about the data structure
+    print(f"\nFraser Institute data types:")
+    print(fraser_clean.dtypes)
+    
+    print(f"\nFraser Institute sample values:")
+    for col in fraser_clean.columns:
+        unique_vals = fraser_clean[col].unique()[:5]
+        print(f"{col}: {unique_vals}")
     
 else:
     print("Could not find proper header row")
@@ -105,10 +127,21 @@ if fraser_clean is not None:
     print("\nFraser Institute Nova Scotia Summary:")
     fraser_ns = fraser_clean[fraser_clean['Province'] == 'Nova Scotia'].copy()
     if not fraser_ns.empty:
-        fraser_summary = fraser_ns.groupby('Year').agg({
-            '50th Percentile': ['mean', 'median', 'count']
-        }).round(1)
-        print(fraser_summary)
+        # Find the metric column that contains wait time data
+        metric_col = None
+        for col in fraser_ns.columns:
+            if 'metric' in str(col).lower() or 'percentile' in str(col).lower():
+                metric_col = col
+                break
+        
+        if metric_col:
+            print(f"Using metric column: {metric_col}")
+            fraser_summary = fraser_ns.groupby(year_col).agg({
+                metric_col: ['mean', 'median', 'count']
+            }).round(1)
+            print(fraser_summary)
+        else:
+            print("No metric column found")
     else:
         print("No Nova Scotia data found in Fraser Institute dataset")
     
@@ -123,49 +156,63 @@ if fraser_clean is not None:
     cihi_merge.columns = ['Province', 'Year', 'CIHI_Surgery_Median_Days', 'CIHI_Surgery_90th_Days']
     
     # Prepare Fraser Institute data for merging
-    if not fraser_ns.empty:
-        fraser_merge = fraser_ns.groupby(['Province', 'Year']).agg({
-            '50th Percentile': 'mean',
-            '90th Percentile': 'mean'
-        }).reset_index()
-        fraser_merge.columns = ['Province', 'Year', 'Fraser_50th_Percentile_Days', 'Fraser_90th_Percentile_Days']
+    if not fraser_ns.empty and year_col:
+        # Find the indicator result column (actual wait time values)
+        result_col = None
+        for col in fraser_ns.columns:
+            if 'result' in str(col).lower() or 'indicator' in str(col).lower():
+                result_col = col
+                break
         
-        # Merge the datasets
-        merged_data = pd.merge(cihi_merge, fraser_merge, on=['Province', 'Year'], how='outer')
-        
-        print(f"Merged data shape: {merged_data.shape}")
-        print("\nMerged data:")
-        print(merged_data)
-        
-        # Save merged data
-        merged_data.to_csv('merged_wait_times_nova_scotia.csv', index=False)
-        print("\nMerged data saved to 'merged_wait_times_nova_scotia.csv'")
-        
-        # Create comparison analysis
-        print("\n" + "="*80)
-        print("4. COMPARISON ANALYSIS")
-        print("-" * 40)
-        
-        # Compare wait times where both datasets have data
-        comparison = merged_data.dropna()
-        if not comparison.empty:
-            print("Wait Time Comparison (where both datasets have data):")
-            print(comparison)
+        if result_col:
+            print(f"Using result column: {result_col}")
             
-            # Calculate correlation
-            correlation = comparison['CIHI_Surgery_Median_Days'].corr(comparison['Fraser_50th_Percentile_Days'])
-            print(f"\nCorrelation between CIHI and Fraser Institute wait times: {correlation:.3f}")
+            # Convert year column to numeric if needed
+            fraser_ns[year_col] = pd.to_numeric(fraser_ns[year_col], errors='coerce')
             
-            # Calculate differences
-            comparison['Difference_Days'] = comparison['CIHI_Surgery_Median_Days'] - comparison['Fraser_50th_Percentile_Days']
-            comparison['Percent_Difference'] = (comparison['Difference_Days'] / comparison['Fraser_50th_Percentile_Days']) * 100
+            fraser_merge = fraser_ns.groupby(['Province', year_col]).agg({
+                result_col: 'mean'
+            }).reset_index()
+            fraser_merge.columns = ['Province', 'Year', 'Fraser_Wait_Time_Days']
             
-            print(f"\nAverage difference: {comparison['Difference_Days'].mean():.1f} days")
-            print(f"Average percent difference: {comparison['Percent_Difference'].mean():.1f}%")
+            # Merge the datasets
+            merged_data = pd.merge(cihi_merge, fraser_merge, on=['Province', 'Year'], how='outer')
+            
+            print(f"Merged data shape: {merged_data.shape}")
+            print("\nMerged data:")
+            print(merged_data)
+            
+            # Save merged data
+            merged_data.to_csv('merged_wait_times_nova_scotia.csv', index=False)
+            print("\nMerged data saved to 'merged_wait_times_nova_scotia.csv'")
+            
+            # Create comparison analysis
+            print("\n" + "="*80)
+            print("4. COMPARISON ANALYSIS")
+            print("-" * 40)
+            
+            # Compare wait times where both datasets have data
+            comparison = merged_data.dropna()
+            if not comparison.empty:
+                print("Wait Time Comparison (where both datasets have data):")
+                print(comparison)
+                
+                # Calculate correlation
+                correlation = comparison['CIHI_Surgery_Median_Days'].corr(comparison['Fraser_Wait_Time_Days'])
+                print(f"\nCorrelation between CIHI and Fraser Institute wait times: {correlation:.3f}")
+                
+                # Calculate differences
+                comparison['Difference_Days'] = comparison['CIHI_Surgery_Median_Days'] - comparison['Fraser_Wait_Time_Days']
+                comparison['Percent_Difference'] = (comparison['Difference_Days'] / comparison['Fraser_Wait_Time_Days']) * 100
+                
+                print(f"\nAverage difference: {comparison['Difference_Days'].mean():.1f} days")
+                print(f"Average percent difference: {comparison['Percent_Difference'].mean():.1f}%")
+            else:
+                print("No overlapping data found for comparison")
         else:
-            print("No overlapping data found for comparison")
+            print("No result column found in Fraser Institute data")
     else:
-        print("No Fraser Institute data available for Nova Scotia")
+        print("No Fraser Institute data available for Nova Scotia or missing year column")
 else:
     print("Could not process Fraser Institute data")
 
