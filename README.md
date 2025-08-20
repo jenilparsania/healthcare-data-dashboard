@@ -184,6 +184,6 @@ For questions or collaboration opportunities, please refer to the project docume
 
 ---
 
-**Last Updated**: December 2024  
+**Last Updated**: December 2024   
 **Data Sources**: Fraser Institute, CIHI  
 **Analysis Period**: 2008-2024
